@@ -17,10 +17,11 @@ import (
 )
 
 // Fixed integration constants from openvaultdb-com/interface/INTEGRATION.md.
-// These MUST match the OVDB server and the manifest verbatim.
+// These MUST match the OVDB server and the manifest verbatim. The vault server's
+// base URL and the vault id are NOT pinned here — they are chosen by the user in
+// OVDB Connect and learned at runtime (the `iss` callback param and the token
+// response's `vault` field), then carried in a Conn.
 const (
-	BaseURL     = "http://localhost:8088"
-	VaultID     = "local"
 	NamespaceID = "todo-demo.openvaultdb.app/openvaultdb/todos"
 	Collection  = "tasks"
 	ClientID    = "todo-demo.openvaultdb.app"
@@ -29,17 +30,27 @@ const (
 	FrontendURL = "http://localhost:5173"
 )
 
-// AuthorizeURL builds the OVDB /authorize URL the backend redirects the user to
-// at the start of the connect flow. The params are pinned by INTEGRATION.md.
-func AuthorizeURL(state string) string {
+// ConnectURL builds the OVDB Connect URL the backend redirects the user to at
+// the start of the connect flow. Connect (openvaultdb.com) lets the user pick a
+// registered vault or paste a connection string, then forwards to that vault
+// server's /authorize. Note: no `vault` or server base URL — Connect resolves it.
+func ConnectURL(connectBase, state string) string {
 	q := url.Values{}
 	q.Set("client_id", ClientID)
 	q.Set("redirect_uri", RedirectURI)
-	q.Set("vault", VaultID)
 	q.Set("namespaceId", NamespaceID)
 	q.Set("role", Role)
 	q.Set("state", state)
-	return BaseURL + "/authorize?" + q.Encode()
+	return strings.TrimRight(connectBase, "/") + "?" + q.Encode()
+}
+
+// Conn is a live, scoped connection to one vault on one OVDB server, established
+// by the connect flow. BaseURL comes from the `iss` callback param; VaultID and
+// Token come from the token exchange.
+type Conn struct {
+	BaseURL string
+	VaultID string
+	Token   string
 }
 
 // TokenResponse is the scoped app token returned by POST /token.
@@ -49,6 +60,7 @@ type TokenResponse struct {
 	ExpiresIn   int32               `json:"expires_in"`
 	NamespaceID string              `json:"namespaceId"`
 	Scope       map[string][]string `json:"scope"`
+	Vault       string              `json:"vault"`
 }
 
 // Client talks to the OVDB server. The zero value is not usable; use New.
@@ -61,15 +73,16 @@ func New() *Client {
 	return &Client{http: &http.Client{Timeout: 15 * time.Second}}
 }
 
-// ExchangeCode swaps an authorization code for a scoped app token via POST /token.
-func (c *Client) ExchangeCode(ctx context.Context, code string) (*TokenResponse, error) {
+// ExchangeCode swaps an authorization code for a scoped app token via POST
+// {baseURL}/token, where baseURL is the issuing vault server (from `iss`).
+func (c *Client) ExchangeCode(ctx context.Context, baseURL, code string) (*TokenResponse, error) {
 	body, _ := json.Marshal(map[string]string{
 		"grant_type":   "authorization_code",
 		"code":         code,
 		"client_id":    ClientID,
 		"redirect_uri": RedirectURI,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, BaseURL+"/token", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/token", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -89,11 +102,13 @@ func (c *Client) ExchangeCode(ctx context.Context, code string) (*TokenResponse,
 	return &tok, nil
 }
 
-// recordsPath builds the record-collection path with the namespace id
-// URL-encoded (its "/" become "%2F"), per INTEGRATION.md.
-func recordsPath(id string) string {
+// recordsPath builds the record-collection path on the connection's vault
+// server, with the namespace id URL-encoded (its "/" become "%2F"), per
+// INTEGRATION.md.
+func recordsPath(conn Conn, id string) string {
 	encNS := url.PathEscape(NamespaceID)
-	p := fmt.Sprintf("%s/vaults/%s/ns/%s/collections/%s/records", BaseURL, VaultID, encNS, Collection)
+	p := fmt.Sprintf("%s/vaults/%s/ns/%s/collections/%s/records",
+		strings.TrimRight(conn.BaseURL, "/"), url.PathEscape(conn.VaultID), encNS, Collection)
 	if id != "" {
 		p += "/" + url.PathEscape(id)
 	}
@@ -124,8 +139,8 @@ func (c *Client) do(ctx context.Context, method, urlStr, token string, body any)
 }
 
 // ListRecords returns all records in the tasks collection.
-func (c *Client) ListRecords(ctx context.Context, token string) ([]Record, error) {
-	resp, err := c.do(ctx, http.MethodGet, recordsPath(""), token, nil)
+func (c *Client) ListRecords(ctx context.Context, conn Conn) ([]Record, error) {
+	resp, err := c.do(ctx, http.MethodGet, recordsPath(conn, ""), conn.Token, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +156,8 @@ func (c *Client) ListRecords(ctx context.Context, token string) ([]Record, error
 }
 
 // CreateRecord creates a record and returns the server-materialized record.
-func (c *Client) CreateRecord(ctx context.Context, token string, rec Record) (Record, error) {
-	resp, err := c.do(ctx, http.MethodPost, recordsPath(""), token, rec)
+func (c *Client) CreateRecord(ctx context.Context, conn Conn, rec Record) (Record, error) {
+	resp, err := c.do(ctx, http.MethodPost, recordsPath(conn, ""), conn.Token, rec)
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +173,8 @@ func (c *Client) CreateRecord(ctx context.Context, token string, rec Record) (Re
 }
 
 // UpdateRecord patches a record by id and returns the updated record.
-func (c *Client) UpdateRecord(ctx context.Context, token, id string, patch Record) (Record, error) {
-	resp, err := c.do(ctx, http.MethodPatch, recordsPath(id), token, patch)
+func (c *Client) UpdateRecord(ctx context.Context, conn Conn, id string, patch Record) (Record, error) {
+	resp, err := c.do(ctx, http.MethodPatch, recordsPath(conn, id), conn.Token, patch)
 	if err != nil {
 		return nil, err
 	}
@@ -175,8 +190,8 @@ func (c *Client) UpdateRecord(ctx context.Context, token, id string, patch Recor
 }
 
 // DeleteRecord removes a record by id.
-func (c *Client) DeleteRecord(ctx context.Context, token, id string) error {
-	resp, err := c.do(ctx, http.MethodDelete, recordsPath(id), token, nil)
+func (c *Client) DeleteRecord(ctx context.Context, conn Conn, id string) error {
+	resp, err := c.do(ctx, http.MethodDelete, recordsPath(conn, id), conn.Token, nil)
 	if err != nil {
 		return err
 	}

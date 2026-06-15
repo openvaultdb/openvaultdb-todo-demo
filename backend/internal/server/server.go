@@ -20,23 +20,26 @@ import (
 // DefaultPort is the demo backend's listen port (per INTEGRATION.md).
 const DefaultPort = 5180
 
-// Server holds the in-memory session (the single scoped OVDB token) and the
+// Server holds the in-memory session (the single scoped OVDB connection) and the
 // OVDB client. A real app would key sessions per user; for the demo a single
-// process-wide token is sufficient.
+// process-wide connection is sufficient.
 type Server struct {
-	ovdb *ovdb.Client
+	ovdb       *ovdb.Client
+	connectURL string // OVDB Connect endpoint to route vault selection through
 
 	mu        sync.RWMutex
-	token     string          // scoped OVDB app token, "" until connected
+	conn      ovdb.Conn       // scoped vault connection; zero value until connected
 	pendingMu sync.Mutex      // guards pending
 	pending   map[string]bool // valid CSRF state values awaiting callback
 }
 
-// New constructs a Server.
-func New() *Server {
+// New constructs a Server. connectURL is the OVDB Connect endpoint the connect
+// flow routes through (e.g. https://openvaultdb.com/connect).
+func New(connectURL string) *Server {
 	return &Server{
-		ovdb:    ovdb.New(),
-		pending: make(map[string]bool),
+		ovdb:       ovdb.New(),
+		connectURL: connectURL,
+		pending:    make(map[string]bool),
 	}
 }
 
@@ -50,7 +53,7 @@ func (s *Server) Listen(ctx context.Context, port int) error {
 		<-ctx.Done()
 		_ = srv.Close()
 	}()
-	fmt.Printf("todo-backend listening on http://localhost:%d (OVDB at %s)\n", port, ovdb.BaseURL)
+	fmt.Printf("todo-backend listening on http://localhost:%d (OVDB Connect: %s)\n", port, s.connectURL)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -76,12 +79,15 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	s.pendingMu.Lock()
 	s.pending[state] = true
 	s.pendingMu.Unlock()
-	http.Redirect(w, r, ovdb.AuthorizeURL(state), http.StatusFound)
+	// Route through OVDB Connect (not straight to a vault server) — Connect lets
+	// the user pick a registered vault or paste a connection string.
+	http.Redirect(w, r, ovdb.ConnectURL(s.connectURL, state), http.StatusFound)
 }
 
 func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
+	iss := r.URL.Query().Get("iss")
 
 	s.pendingMu.Lock()
 	ok := s.pending[state]
@@ -95,14 +101,20 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing authorization code", http.StatusBadRequest)
 		return
 	}
+	// `iss` (RFC 9207) names the vault server that issued the code — chosen by the
+	// user in OVDB Connect. We exchange the code and run record CRUD against it.
+	if iss == "" {
+		http.Error(w, "missing iss (issuing vault server)", http.StatusBadRequest)
+		return
+	}
 
-	tok, err := s.ovdb.ExchangeCode(r.Context(), code)
+	tok, err := s.ovdb.ExchangeCode(r.Context(), iss, code)
 	if err != nil {
 		http.Error(w, "token exchange failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	s.mu.Lock()
-	s.token = tok.AccessToken
+	s.conn = ovdb.Conn{BaseURL: iss, VaultID: tok.Vault, Token: tok.AccessToken}
 	s.mu.Unlock()
 
 	http.Redirect(w, r, ovdb.FrontendURL, http.StatusFound)
@@ -118,24 +130,24 @@ type Task struct {
 	CreatedAt string `json:"createdAt"`
 }
 
-func (s *Server) currentToken() (string, bool) {
+func (s *Server) currentConn() (ovdb.Conn, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.token, s.token != ""
+	return s.conn, s.conn.Token != ""
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	_, connected := s.currentToken()
+	_, connected := s.currentConn()
 	writeJSON(w, http.StatusOK, map[string]bool{"connected": connected})
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	token, ok := s.currentToken()
+	conn, ok := s.currentConn()
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "not connected")
 		return
 	}
-	recs, err := s.ovdb.ListRecords(r.Context(), token)
+	recs, err := s.ovdb.ListRecords(r.Context(), conn)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -148,7 +160,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	token, ok := s.currentToken()
+	conn, ok := s.currentConn()
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "not connected")
 		return
@@ -164,7 +176,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "title is required")
 		return
 	}
-	rec, err := s.ovdb.CreateRecord(r.Context(), token, ovdb.Record{
+	rec, err := s.ovdb.CreateRecord(r.Context(), conn, ovdb.Record{
 		"title": body.Title,
 		"done":  false,
 	})
@@ -176,7 +188,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
-	token, ok := s.currentToken()
+	conn, ok := s.currentConn()
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "not connected")
 		return
@@ -201,7 +213,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "nothing to update")
 		return
 	}
-	rec, err := s.ovdb.UpdateRecord(r.Context(), token, id, patch)
+	rec, err := s.ovdb.UpdateRecord(r.Context(), conn, id, patch)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -210,13 +222,13 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
-	token, ok := s.currentToken()
+	conn, ok := s.currentConn()
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "not connected")
 		return
 	}
 	id := r.PathValue("id")
-	if err := s.ovdb.DeleteRecord(r.Context(), token, id); err != nil {
+	if err := s.ovdb.DeleteRecord(r.Context(), conn, id); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}

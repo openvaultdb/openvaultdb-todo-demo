@@ -35,14 +35,19 @@ func newRootCommand() *cobra.Command {
 }
 
 func serveCommand() *cobra.Command {
-	var port int
+	var (
+		port       int
+		connectURL string
+	)
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the demo REST API and OVDB connect-flow proxy",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return server.New().Listen(cmd.Context(), port)
+			return server.New(connectURL).Listen(cmd.Context(), port)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", server.DefaultPort, "port to listen on")
+	cmd.Flags().StringVar(&connectURL, "connect-url", "http://localhost:5000/connect",
+		"OVDB Connect endpoint to route vault selection through (prod: https://openvaultdb.com/connect)")
 	return cmd
 }
