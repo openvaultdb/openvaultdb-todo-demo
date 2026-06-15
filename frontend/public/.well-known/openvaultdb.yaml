@@ -1,0 +1,12 @@
+# OpenVaultDB app manifest for the to-do demo.
+# Served by the frontend at http://localhost:5173/.well-known/openvaultdb.yaml
+# The wallet/server fetch this to learn the app's identity, the namespace it
+# uses, and the roles it may request during the connect flow.
+client_id: todo-demo.openvaultdb.app
+name: OpenVaultDB To-Do Demo
+namespace: todo-demo.openvaultdb.app/openvaultdb/todos
+roles:
+  editor:
+    tasks: [read, write, delete]
+  viewer:
+    tasks: [read]
