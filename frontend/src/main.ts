@@ -8,11 +8,15 @@ const app = document.querySelector<HTMLDivElement>("#app")!;
 let connected = false;
 let tasks: Task[] = [];
 let error: string | null = null;
+let focusAdd = false; // refocus the add input after a task is added
 
 async function refresh(): Promise<void> {
   try {
     connected = await api.status();
     tasks = connected ? await api.list() : [];
+    // Show newest first. createdAt is server-set RFC3339, so a string compare
+    // is chronological; descending puts the latest on top.
+    tasks.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     error = null;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
@@ -67,6 +71,7 @@ function render(): void {
     const title = input.value.trim();
     if (!title) return;
     input.value = "";
+    focusAdd = true; // return focus to the input after the re-render
     void run(() => api.create(title));
   };
   card.append(form);
@@ -97,6 +102,11 @@ function render(): void {
   }
   card.append(ul);
   app.append(card);
+
+  if (focusAdd) {
+    focusAdd = false;
+    input.focus();
+  }
 }
 
 function el(tag: string, className: string, text?: string): HTMLElement {
