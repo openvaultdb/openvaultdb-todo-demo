@@ -142,3 +142,20 @@ body {
 .list .del:hover {
   color: #ff9aa0;
 }
+
+.clear-all {
+  display: block;
+  margin: 14px 0 0 auto;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #3a2330;
+  background: transparent;
+  color: #ff9aa0;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.clear-all:hover {
+  background: #2a1416;
+  border-color: #5a2227;
+}

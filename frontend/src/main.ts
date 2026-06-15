@@ -101,6 +101,17 @@ function render(): void {
     ul.append(li);
   }
   card.append(ul);
+
+  if (tasks.length > 0) {
+    const clear = el("button", "clear-all", "Clear all") as HTMLButtonElement;
+    clear.type = "button";
+    clear.onclick = () => {
+      if (!confirm(`Delete all ${tasks.length} tasks?`)) return;
+      void run(() => Promise.all(tasks.map((t) => api.remove(t.id))));
+    };
+    card.append(clear);
+  }
+
   app.append(card);
 
   if (focusAdd) {
