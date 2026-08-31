@@ -1,0 +1,33 @@
+name: Go CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+
+  strongo_workflow:
+    permissions:
+      contents: write
+    # Pinned to an exact tag, not the moving @v1 tag: @v1 has been retired
+    # because it drifted patch releases behind while still accepting inputs
+    # it did not implement, so a configured input could silently no-op.
+    uses: strongo/cicd/.github/workflows/workflow.yml@v1.14.17
+
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+    with:
+      # Demo app for the openvaultdb-go CLI, not a release-cutting artifact.
+      disable-version-bumping: true
+      go_version: '1.27.0'
+      # The Go module lives in backend/ (frontend/ is a separate TS/Vite app).
+      working_directory: backend
+      # Measured (go test ./... -coverprofile + go tool cover -func): 0.0%.
+      # No _test.go files anywhere in backend/ (576 lines untested); floor
+      # set at the true, honestly-measured value.
+      min_test_coverage_percent: 0

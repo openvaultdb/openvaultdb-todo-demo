@@ -91,7 +91,7 @@ func (c *Client) ExchangeCode(ctx context.Context, baseURL, code string) (*Token
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, apiError(resp)
 	}
@@ -144,7 +144,7 @@ func (c *Client) ListRecords(ctx context.Context, conn Conn) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, apiError(resp)
 	}
@@ -161,7 +161,7 @@ func (c *Client) CreateRecord(ctx context.Context, conn Conn, rec Record) (Recor
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, apiError(resp)
 	}
@@ -178,7 +178,7 @@ func (c *Client) UpdateRecord(ctx context.Context, conn Conn, id string, patch R
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, apiError(resp)
 	}
@@ -195,7 +195,7 @@ func (c *Client) DeleteRecord(ctx context.Context, conn Conn, id string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return apiError(resp)
 	}
