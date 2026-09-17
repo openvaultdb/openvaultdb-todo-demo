@@ -1,9 +1,9 @@
 # OpenVaultDB To-Do Demo
 
 > **Looking for the OpenVaultDB first-run demo?** It is built into `ovdb`
-> releases after vX (preview-gated behind `OVDB_PREVIEW=1` until the founder
-> review): run `ovdb demo install`, then `ovdb demo open`, or choose **Try a
-> demo** in `ovdb` or its web console. No clone, no extra processes, no
+> v0.12.0 and later as a preview: with `OVDB_PREVIEW=1` set, run
+> `ovdb demo install`, then `ovdb demo open`, or choose **Try a demo** in
+> `ovdb` or its web console. No clone, no extra processes, no
 > connect flow. See
 > [decision 0010: built-in TODO demo](https://github.com/openvaultdb/openvaultdb/blob/main/spec/decisions/0010-built-in-todo-demo.md).
 >
