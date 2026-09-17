@@ -1,5 +1,15 @@
 # OpenVaultDB To-Do Demo
 
+> **Looking for the OpenVaultDB first-run demo?** It is now built into `ovdb`:
+> run `ovdb demo install` then `ovdb demo open` (or choose **Try a demo** in
+> `ovdb` or the web console). No clone, no extra processes, no connect flow.
+> See [decision 0010: built-in TODO demo](https://github.com/openvaultdb/openvaultdb/blob/main/spec/decisions/0010-built-in-todo-demo.md).
+>
+> This repository is superseded as OVDB's first-run demo. It stays as the
+> reference example of a **third-party app using the connect flow**, which
+> local mode supports through bearer tokens and origins listed in
+> `server.cors`.
+
 A realistic third-party to-do app that uses **OpenVaultDB (OVDB)** as its
 database. It demonstrates the OVDB *connect flow*: the app asks the user to
 connect their vault, receives a scoped token, and stores every task as a record
